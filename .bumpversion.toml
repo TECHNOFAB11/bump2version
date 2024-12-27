@@ -1,6 +1,7 @@
 current_version = "0.1.4"
 commit = true
 tag = true
+message = "chore: bump {current_version} → {new_version}"
 # parse = '(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(-(?P<stage>[^.]*)\.(?P<devnum>\d+))?'
 # serialize = "{major}.{minor}.{patch}-{stage}.{devnum}"
 
@@ -11,3 +12,7 @@ values = ["alpha", "beta", "stable"]
 
 [file."Cargo.toml"]
 format = 'version = "{version}"'
+
+[file."Cargo.lock"]
+format = """name = "bump2version"
+version = "{version}""""
