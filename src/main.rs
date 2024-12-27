@@ -2,8 +2,6 @@ use self::cli::Cli;
 use crate::config::Config;
 use crate::utils::attempt_version_bump;
 use clap::Parser;
-use config::File;
-use std::collections::HashMap;
 use std::fs;
 use std::process::{exit, Command};
 use tracing::{error, info, level_filters::LevelFilter, warn};

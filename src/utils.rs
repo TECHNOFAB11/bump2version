@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::ops::Index;
 use tracing::{error, trace};
 
-pub fn attempt_version_bump(args: Cli, config: Config) -> Option<String> {
+pub(crate) fn attempt_version_bump(args: Cli, config: Config) -> Option<String> {
     let parse_regex = config.parse;
     let regex = match Regex::new(&parse_regex) {
         Ok(r) => r,
