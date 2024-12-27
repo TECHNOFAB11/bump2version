@@ -1,47 +1,63 @@
 use self::cli::Cli;
+use crate::config::Config;
 use crate::utils::attempt_version_bump;
-use crate::utils::get_current_version_from_config;
-use crate::utils::read_files_from_config;
 use clap::Parser;
-use std::collections::HashSet;
 use std::fs;
-use std::process::Command;
+use std::process::{exit, Command};
+use tracing::{error, info, level_filters::LevelFilter, warn};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod cli;
+mod config;
 mod utils;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .init();
+
     let args = Cli::parse();
     let config_file = args.config_file.clone();
-    let config_content = fs::read_to_string(args.config_file.clone()).unwrap();
-    let config_version = get_current_version_from_config(&config_content)
-        .ok_or("failed to get current version from config")?;
-    let current_version = args
-        .current_version
-        .clone()
-        .unwrap_or(config_version)
-        .clone();
-
-    let attempted_new_version = if let Some(version) = args.new_version {
-        Some(version)
-    } else {
-        attempt_version_bump(args.clone())
+    let contents = match fs::read_to_string(&config_file) {
+        Ok(c) => c,
+        Err(err) => {
+            error!(?err, config_file, "Could not read config");
+            exit(1);
+        }
     };
+    let config: Config = match toml::from_str(&contents) {
+        Ok(d) => d,
+        Err(err) => {
+            error!(err = err.to_string(), config_file, "Unable to load config");
+            exit(1);
+        }
+    };
+
+    let current_version = config.current_version.clone();
+
+    let attempted_new_version = args
+        .new_version
+        .clone()
+        .or(attempt_version_bump(args.clone(), config.clone()));
 
     if attempted_new_version.is_some() {
         let new_version = attempted_new_version.clone().unwrap();
+        info!(current_version, new_version, "Bumping version");
 
         let dry_run = args.dry_run;
-        let commit = args.commit;
-        let tag = args.tag;
-        let message = args.message;
+        let commit = args.commit.unwrap_or(config.commit);
+        let tag = args.tag.unwrap_or(config.tag);
+        let message = args
+            .message
+            .or(config.message)
+            .unwrap_or("Bump version: {current_version} → {new_version}".to_string());
 
-        let files: Vec<String> = if args.files.is_empty() {
-            let config_files: HashSet<String> = read_files_from_config(&args.config_file)?;
-            config_files.into_iter().collect()
-        } else {
-            args.files
-        };
+        let files: Vec<&String> = config.file.keys().collect();
 
         // Check if Git working directory is clean
         if fs::metadata(".git").is_ok() {
@@ -57,19 +73,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .collect();
 
             if !git_lines.is_empty() {
-                panic!("Git working directory not clean:\n{}", git_lines.join("\n"));
+                warn!("Git working directory not clean:\n{}", git_lines.join("\n"));
+                if args.fail_on_dirty {
+                    exit(1);
+                }
             }
         }
 
         // Update version in specified files
-        for path in &files {
+        info!(amount = &files.len(), "Updating version in files");
+        for path in files.clone() {
             let content = fs::read_to_string(path)?;
+            let format = &config.file.get(path).unwrap().format;
 
-            if !content.contains(&current_version) {
-                panic!("Did not find string {} in file {}", current_version, path);
+            let old_line = format.replace("{version}", &current_version);
+            if !content.contains(&old_line) {
+                warn!(
+                    current_version,
+                    path, "Did not find current version in file"
+                );
             }
 
-            let updated_content = content.replace(&current_version, &new_version);
+            let new_line = format.replace("{version}", &new_version);
+            let updated_content = content.replace(&old_line, &new_line);
 
             if !dry_run {
                 fs::write(path, updated_content)?;
@@ -78,18 +104,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut commit_files = files.clone();
 
-        // Update config file if applicable
-        if fs::metadata(config_file.clone()).is_ok() {
+        // Update config file if applicable & writable
+        let metadata = fs::metadata(config_file.clone());
+        if metadata.is_ok() && !metadata.unwrap().permissions().readonly() {
+            info!("Updating version in config file");
             let mut config_content = fs::read_to_string(config_file.clone())?;
 
             config_content = config_content.replace(
-                &format!("current_version = {}", current_version),
-                &format!("current_version = {}", new_version),
+                &format!("current_version = \"{}\"", current_version),
+                &format!("current_version = \"{}\"", new_version),
             );
 
             if !dry_run {
                 fs::write(config_file.clone(), config_content)?;
-                commit_files.push(config_file);
+                commit_files.push(&config_file);
             }
         }
         if commit {
@@ -100,11 +128,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(output) => {
                         if !output.status.success() {
                             let stderr = String::from_utf8_lossy(&output.stderr);
-                            eprintln!("Error during git add:\n{}", stderr);
+                            error!(?stderr, "Error during git add");
                         }
                     }
                     Err(err) => {
-                        eprintln!("Failed to execute git add: {}", err);
+                        error!(?err, "Failed to execute git add");
                     }
                 }
             }
@@ -126,24 +154,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         match commit_output {
                             Ok(commit_output) => {
                                 if commit_output.status.success() {
-                                    println!("Git commit successful");
+                                    info!("Git commit successful");
                                 } else {
-                                    eprintln!(
-                                        "Error during git commit:\n{}",
-                                        String::from_utf8_lossy(&commit_output.stderr)
-                                    );
+                                    let stderr = String::from_utf8_lossy(&commit_output.stderr);
+                                    error!(?stderr, "Error during git commit",);
                                 }
                             }
                             Err(err) => {
-                                eprintln!("Failed to execute git commit: {}", err);
+                                error!(?err, "Failed to execute git commit");
                             }
                         }
                     } else {
-                        println!("No changes to commit. Working tree clean.");
+                        warn!("No changes to commit. Working tree clean.");
                     }
                 }
                 Err(err) => {
-                    eprintln!("Failed to execute git diff: {}", err);
+                    error!(?err, "Failed to execute git diff");
                 }
             }
 
@@ -155,7 +181,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
-        eprintln!("No files specified");
+        error!("No new version passed and generating new version failed");
     }
 
     Ok(())

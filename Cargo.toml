@@ -8,7 +8,10 @@ keywords = ["cli", "parser"]
 categories = ["command-line-utilities"]
 repository = "https://github.com/wiseaidev/bump2version"
 documentation = "https://docs.rs/bump2version"
-authors = ["Mahmoud Harmouch <oss@wiseai.dev>"]
+authors = [
+  "Mahmoud Harmouch <oss@wiseai.dev>",
+  "TECHNOFAB <admin@technofab.de>",
+]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
@@ -17,6 +20,11 @@ crate-type = ["cdylib"]
 [dependencies]
 clap = { version = "4.5.1", features = ["derive"] }
 regex = "1.10.3"
+serde = "1.0.216"
+serde_derive = "1.0.216"
+toml = "0.8.19"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [profile.release]
 codegen-units = 1

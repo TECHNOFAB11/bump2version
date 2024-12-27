@@ -1,22 +1,13 @@
-[bumpversion]
-current_version = 0.1.4
-commit = True
-tag = True
-parse = (?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(-(?P<stage>[^.]*)\.(?P<devnum>\d+))?
-serialize = 
-	{major}.{minor}.{patch}-{stage}.{devnum}
-	{major}.{minor}.{patch}
+current_version = "0.1.4"
+commit = true
+tag = true
+# parse = '(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(-(?P<stage>[^.]*)\.(?P<devnum>\d+))?'
+# serialize = "{major}.{minor}.{patch}-{stage}.{devnum}"
 
-[bumpversion:part:stage]
-optional_value = stable
-first_value = stable
-values = 
-	alpha
-	beta
-	stable
+# example part:
+[part.stage]
+type = "string"
+values = ["alpha", "beta", "stable"]
 
-[bumpversion:part:devnum]
-
-[bumpversion:file:Cargo.toml]
-search = version = "{current_version}"
-replace = version = "{new_version}"
+[file."Cargo.toml"]
+format = 'version = "{version}"'

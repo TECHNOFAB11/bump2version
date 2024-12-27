@@ -1,54 +1,22 @@
 use crate::cli::Cli;
+use crate::config::{Config, PartType};
 use regex::Regex;
+use std::cmp::min;
 use std::collections::HashMap;
-use std::collections::HashSet;
-use std::fs;
+use std::ops::Index;
+use tracing::{error, trace};
 
-pub fn get_current_version_from_config(config_content: &str) -> Option<String> {
-    let current_version_regex =
-        Regex::new(r#"\[bumpversion\]\s*current_version\s*=\s*(?P<version>\d+(\.\d+){0,2})\s*"#)
-            .unwrap();
-
-    if let Some(captures) = current_version_regex.captures(config_content) {
-        if let Some(version) = captures.name("version") {
-            return Some(version.as_str().to_string());
-        }
-    }
-
-    None
-}
-
-// Function to read files from the configuration file
-pub fn read_files_from_config(config_file: &str) -> Result<HashSet<String>, std::io::Error> {
-    let config_content = fs::read_to_string(config_file)?;
-    let mut config_files = HashSet::new();
-
-    for line in config_content.lines() {
-        if let Some(file_section) = line.strip_prefix("[bumpversion:file:") {
-            if let Some(file_name) = file_section.split(']').next() {
-                config_files.insert(file_name.trim().to_string());
-            }
-        }
-    }
-
-    Ok(config_files)
-}
-
-pub fn attempt_version_bump(args: Cli) -> Option<String> {
-    let parse_regex = args.parse.clone();
+pub fn attempt_version_bump(args: Cli, config: Config) -> Option<String> {
+    let parse_regex = config.parse;
     let regex = match Regex::new(&parse_regex) {
         Ok(r) => r,
-        Err(_) => {
-            eprintln!("--patch '{}' is not a valid regex", args.parse.clone());
+        Err(err) => {
+            error!(?err, parse_regex, "Invalid 'parse' regex");
             return None;
         }
     };
 
-    let config_content = fs::read_to_string(args.config_file.clone()).unwrap();
-    let current_version = get_current_version_from_config(&config_content).unwrap_or_else(|| {
-        panic!("Failed to extract current version from config file");
-    });
-    // let current_version = args.current_version.unwrap_or("".to_string());
+    let current_version = config.current_version;
     let mut parsed: HashMap<String, String> = HashMap::new();
 
     if let Some(captures) = regex.captures(&current_version) {
@@ -59,41 +27,83 @@ pub fn attempt_version_bump(args: Cli) -> Option<String> {
         }
     }
 
-    let order: Vec<&str> = args
+    let order: Vec<&str> = config
         .serialize
         .match_indices('{')
-        .map(|(i, _)| args.serialize[i + 1..].split('}').next().unwrap().trim())
+        .map(|(i, _)| config.serialize[i + 1..].split('}').next().unwrap().trim())
         .collect();
+
+    trace!(?order, "detected version parts");
 
     let mut bumped = false;
 
-    for label in order {
+    let part_configs = config.part.clone();
+
+    for label in order.clone() {
         if let Some(part) = parsed.get_mut(label) {
+            let part_cfg = part_configs.get(label);
+
             if label == args.bump {
-                if let Ok(new_value) = part.parse::<u64>() {
-                    *part = (new_value + 1).to_string();
-                    bumped = true;
-                } else {
-                    eprintln!("Failed to parse '{}' as u64", part);
-                    return None;
+                match part_cfg
+                    .map(|cfg| cfg.r#type.clone())
+                    .unwrap_or(PartType::Number)
+                {
+                    PartType::String => {
+                        let values = part_cfg
+                            .unwrap()
+                            .values
+                            .clone()
+                            .expect("part values do not exist for string type");
+                        let old_index: usize = values
+                            .iter()
+                            .position(|val| val == part)
+                            .expect("part value does not exist");
+                        let new_index: usize = min(old_index + 1, values.len() - 1);
+                        *part = values.index(new_index).to_string();
+                        bumped = true;
+                    }
+                    PartType::Number => {
+                        if let Ok(old_value) = part.parse::<u64>() {
+                            *part = (old_value + 1).to_string();
+                            bumped = true;
+                        } else {
+                            error!(part, "Failed to parse as u64");
+                            return None;
+                        }
+                    }
                 }
             } else if bumped {
-                *part = "0".to_string();
+                match part_cfg
+                    .map(|cfg| cfg.r#type.clone())
+                    .unwrap_or(PartType::Number)
+                {
+                    PartType::Number => *part = "0".to_string(),
+                    PartType::String => {
+                        let values = part_cfg
+                            .unwrap()
+                            .values
+                            .clone()
+                            .expect("part values do not exist for string type");
+                        *part = values.index(0).to_string();
+                    }
+                }
             }
+        } else {
+            trace!(label, "part not found");
         }
     }
 
     if bumped {
-        let new_version = format!(
-            "{}.{}.{}",
-            parsed.get("major").unwrap_or(&"0".to_string()),
-            parsed.get("minor").unwrap_or(&"0".to_string()),
-            parsed.get("patch").unwrap_or(&"0".to_string())
-        );
-        let version = args
-            .serialize
-            .replace("{major}.{minor}.{patch}", &new_version);
-        Some(version)
+        let mut new_version = config.serialize.clone();
+        for part in order {
+            trace!(new_version, part, "building new version");
+            new_version = new_version.replace(
+                &format!("{{{}}}", part),
+                parsed.get(part).expect("unexpected part in version found"),
+            );
+        }
+        trace!(new_version, "created new version");
+        Some(new_version)
     } else {
         None
     }
