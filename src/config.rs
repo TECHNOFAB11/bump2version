@@ -13,8 +13,8 @@ pub(crate) struct Config {
     #[serde(default = "default_serialize")]
     pub(crate) serialize: String,
 
-    pub(crate) part: HashMap<String, Part>,
-    pub(crate) file: HashMap<String, File>,
+    pub(crate) part: Option<HashMap<String, Part>>,
+    pub(crate) file: Option<HashMap<String, File>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

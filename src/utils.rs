@@ -41,7 +41,7 @@ pub fn attempt_version_bump(args: Cli, config: Config) -> Option<String> {
 
     for label in order.clone() {
         if let Some(part) = parsed.get_mut(label) {
-            let part_cfg = part_configs.get(label);
+            let part_cfg = part_configs.as_ref().and_then(|c| c.get(label));
 
             if label == args.bump {
                 match part_cfg

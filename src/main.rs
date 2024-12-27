@@ -2,6 +2,8 @@ use self::cli::Cli;
 use crate::config::Config;
 use crate::utils::attempt_version_bump;
 use clap::Parser;
+use config::File;
+use std::collections::HashMap;
 use std::fs;
 use std::process::{exit, Command};
 use tracing::{error, info, level_filters::LevelFilter, warn};
@@ -57,7 +59,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .or(config.message)
             .unwrap_or("Bump version: {current_version} → {new_version}".to_string());
 
-        let files: Vec<&String> = config.file.keys().collect();
+        let config_files = config.file.unwrap_or_default();
+        let files: Vec<&String> = config_files.keys().collect();
 
         // Check if Git working directory is clean
         if fs::metadata(".git").is_ok() {
@@ -84,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!(amount = &files.len(), "Updating version in files");
         for path in files.clone() {
             let content = fs::read_to_string(path)?;
-            let format = &config.file.get(path).unwrap().format;
+            let format = &config_files.get(path).unwrap().format.clone();
 
             let old_line = format.replace("{version}", &current_version);
             if !content.contains(&old_line) {
