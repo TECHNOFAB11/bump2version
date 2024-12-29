@@ -84,22 +84,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Update version in specified files
         info!(amount = &files.len(), "Updating version in files");
         for path in files.clone() {
-            let content = fs::read_to_string(path)?;
-            let format = &config_files.get(path).unwrap().format.clone();
+            let mut content = fs::read_to_string(path)?;
+            let formats = &config_files.get(path).unwrap().formats.clone();
 
-            let old_line = format.replace("{version}", &current_version);
-            if !content.contains(&old_line) {
-                warn!(
-                    current_version,
-                    path, "Did not find current version in file"
-                );
+            for format in formats {
+                let old_line = format.replace("{version}", &current_version);
+                if !content.contains(&old_line) {
+                    warn!(
+                        current_version,
+                        path, "Did not find current version in file"
+                    );
+                }
+
+                let new_line = format.replace("{version}", &new_version);
+                content = content.replace(&old_line, &new_line);
             }
 
-            let new_line = format.replace("{version}", &new_version);
-            let updated_content = content.replace(&old_line, &new_line);
-
             if !dry_run {
-                fs::write(path, updated_content)?;
+                fs::write(path, content)?;
             }
         }
 

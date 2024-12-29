@@ -35,8 +35,8 @@ pub(crate) struct Part {
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct File {
-    /// Format to replace, eg. `current_version = "{version}"`
-    pub(crate) format: String,
+    /// Formats to replace, eg. `current_version = "{version}"`
+    pub(crate) formats: Vec<String>,
 }
 
 fn default_parse() -> String {
